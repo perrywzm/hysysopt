@@ -11,7 +11,7 @@ opt = hysysopt.init()
 
 # Links up to a HYSYS spreadsheet object which contains the optimization variables.
 # Each row should be: | var_import | lower_bound | upper_bound |
-opt.get_params('opt')
+opt.get_opt_vars('opt')
 
 # Adds feed stage location parameter to the optimization variable list.
 # Lower and upper bounds are specified as a fraction of the total stages.

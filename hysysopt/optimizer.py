@@ -45,10 +45,10 @@ class HysysOptimizer:
         self.get_column_deltaP = _default_column_pressure_drop
 
 
-    def get_params(self, sheet_name):
+    def get_opt_vars(self, sheet_name):
         '''
-        Automatic parameter acquisition from the specified spreadsheet. Search string is not case-sensitive.
-        Requires the parameters to be listed in the following format:
+        Automatic variable acquisition from the specified spreadsheet. Search string is not case-sensitive.
+        Requires the HYSYS parameters to be listed in the following format:
 
          -------------------------------------------------
         | param 1 to optimize | lower bound | upper bound |
@@ -61,7 +61,7 @@ class HysysOptimizer:
             sheet_name: Name of spreadsheet object in Hysys case file
         '''
 
-        print("Initializing optimization parameters...")
+        print("Initializing optimization variables...")
         results = list(filter(lambda o: o.name.lower() == sheet_name.lower(), self.operations))
         # Terminate if no matching operations are found
         if len(results) <= 0:
@@ -73,7 +73,6 @@ class HysysOptimizer:
 
         # Extract out parameter data from spreadsheet
         # Each parameter will be a dictionary of {"name", "value", "lb", "ub", "unit"}
-        params = []
 
         # Sanity check for number of columns
         if ss.NumberOfColumns < 3:
@@ -102,6 +101,7 @@ class HysysOptimizer:
 
             param = {"name": name, "value": value, "lb": lb, "ub": ub, "unit": unit, "interface": cell}
 
+            # 5. Special considerations if the variable is the column pressure parameter
             if name == "Top Stage Press":
                 print("Column condenser pressure detected! Linking bottom pressure with condenser pressure...")
                 if ss.Cell(_get_cell_ref(i, 4)).VariableName != "Bottom Stage Press":
@@ -113,20 +113,18 @@ class HysysOptimizer:
                 param["col_interface"] = None
                 param["btm_interface"] = ss.Cell(_get_cell_ref(i, 4))
 
+            # 6. Add the parameter to the list
             params.append(param)
             print("... Identified: {}{} with lb={}, ub={}".format(
                 param["name"], " ({})".format(unit) if unit != "" else "", param["lb"], param["ub"]))
 
-        print("Acquired {} optimization parameters. Please ensure that this number is correct.".format(len(params)))
+        print("Acquired {} optimization variables. Please ensure that this number is correct.".format(len(params)))
         print('=' * 45)
-        # print("For additional parameters e.g. feed location, please add them manually.")
-        # print("Currently implemented additional params: Feed location via optimize_feed_location() method")
-        self.params = params
         return params
 
     def optimize_feed_location(self, col_name, stream_name=None, lb_frac=0.1, ub_frac=0.9):
         '''
-        Adds the feed location as an optimization parameter. Location is specified by fraction of the tower's total
+        Adds the feed location as an optimization variable. Location is specified by fraction of the tower's total
         trays. (E.g. 0.2 of a 100 stage column places the feed location at 20)
 
         Args:
@@ -137,7 +135,7 @@ class HysysOptimizer:
                 feed column. Case-insensitive.
         '''
 
-        print("Adding Feed Location optimization parameter...")
+        print("Adding Feed Location optimization variable...")
         result = list(filter(lambda o: o.name.lower() == col_name.lower(), self.operations))
 
         if len(result) == 0:
@@ -172,7 +170,7 @@ class HysysOptimizer:
         print("... Identified: {}, lb={}, ub={}".format(param["name"], param["lb"], param["ub"]))
 
         self.params.append(param)
-        print("{} parameters currently identified.".format(len(self.params)))
+        print("{} variables currently identified.".format(len(self.params)))
         print('=' * 45)
 
     def list_params(self):
@@ -202,6 +200,8 @@ class HysysOptimizer:
                 "not the COM object itself.")
         elif optype.lower() == "heatexchangers":
             print("Detected heat exchangers as optype. Ensure the cost function handles the heater/cooler COM object.")
+        else:
+            raise NotImplementedError("Type of operation specified is unknown!")
         self.cost_funcs.append({"fn": cost_func, "op": optype.lower()})
 
     def run(self, n_iter=20, num=20, algo="pso", save_data=False):
@@ -221,6 +221,8 @@ class HysysOptimizer:
             pso.run(n_iter, callback=callback)
 
             self.optimal_params = pso.global_best
+        else:
+            raise NotImplementedError("Algorithm type supplied is either not implemented or unknown.")
     
     def save_current_iteration(self, idx, x, y):
         output = np.concatenate([x, y.reshape(-1,1)], axis=1).flatten()
@@ -241,7 +243,7 @@ class HysysOptimizer:
 
     def objective_function(self, x):
         '''
-        Takes in a set of new params to load into the HYSYS model. Runs all the provided cost functions
+        Takes in a set of new vars to load into the HYSYS model. Runs all the provided cost functions
         to obtain the final cost.
         '''
 
@@ -254,31 +256,34 @@ class HysysOptimizer:
             self.case.Solver.CanSolve = solver_state
 
             for i, p in enumerate(self.params):
-                if self.params[i]["unit"] == "feed_location":
-                    feed_stage = round(x[i] * self.params[i]["interface"].ColumnFlowsheet.Operations.Item(0).NumberOfTrays)
-                    self.params[i]["interface"].ColumnFlowsheet.Operations.Item(0).SpecifyFeedLocation(self.params[i]["stream_interface"], feed_stage)
-                elif self.params[i]["name"] == "Top Stage Press":
-                    # Erase column pressures before setting new ones
+                if p["unit"] == "feed_location":
+                    feed_stage = round(x[i] * p["interface"].ColumnFlowsheet.Operations.Item(0).NumberOfTrays)
+                    p["interface"].ColumnFlowsheet.Operations.Item(0).SpecifyFeedLocation(p["stream_interface"], feed_stage)
+                elif p["name"] == "Top Stage Press":
+                    # Erase column pressures before setting new ones (erasing once is enough)
                     if solver_state == 0:
-                        self.params[i]["interface"].ImportedVariable.Erase()
-                        self.params[i]["btm_interface"].ImportedVariable.Erase()
-                        continue
-
-                    # Get columnflowsheet operation and parameters
-                    cfs_op = self.params[i]["interface"].ImportedVariable.Parent.ColumnFlowsheet
-                    n_trays = cfs_op.Operations.Item(0).NumberOfTrays
-                    dp_cond = cfs_op.Operations.Item(1).VesselPressureDrop.GetValue('kPa')
-                    dp_reb = cfs_op.Operations.Item(2).VesselPressureDrop.GetValue('kPa')
-                    pressure_drop = self.get_column_deltaP(x[i], n_trays, dp_cond, dp_reb)
-
-                    # Set condenser pressure
-                    self.params[i]["interface"].ImportedVariable.SetValue(x[i], self.params[i]["unit"])
-
-                    # Set reboiler pressure
-                    self.params[i]["btm_interface"].ImportedVariable.SetValue(pressure_drop, self.params[i]["unit"])
+                        p["interface"].ImportedVariable.Erase()
+                        p["btm_interface"].ImportedVariable.Erase()
+                    continue
                 else:
-                    self.params[i]["interface"].ImportedVariable.SetValue(x[i], self.params[i]["unit"])
+                    p["interface"].ImportedVariable.SetValue(x[i], p["unit"])
 
+        # Update column pressures
+        for i, p in enumerate(self.params):
+            if p["name"] == "Top Stage Press":
+                # Get columnflowsheet operation and parameters
+                cfs_op = p[i]["interface"].ImportedVariable.Parent.ColumnFlowsheet
+                n_trays = cfs_op.Operations.Item(0).NumberOfTrays
+                dp_cond = cfs_op.Operations.Item(1).VesselPressureDrop.GetValue('kPa')
+                dp_reb = cfs_op.Operations.Item(2).VesselPressureDrop.GetValue('kPa')
+                pressure_drop = self.get_column_deltaP(x[i], n_trays, dp_cond, dp_reb)
+
+                # Set condenser pressure
+                p["interface"].ImportedVariable.SetValue(x[i], p["unit"])
+
+                # Set reboiler pressure
+                p["btm_interface"].ImportedVariable.SetValue(pressure_drop, p["unit"])
+        
         # Set efficiency (requires solver pause)
         if len(self.efficiency_specs) > 0:
             self.case.Solver.CanSolve = False
