@@ -118,8 +118,8 @@ class HysysOptimizer:
             print("... Identified: {}{} with lb={}, ub={}".format(
                 param["name"], " ({})".format(unit) if unit != "" else "", param["lb"], param["ub"]))
 
-        print("Acquired {} optimization variables. Please ensure that this number is correct.".format(len(params)))
-        return params
+        print("Acquired {} optimization variables. Please ensure that this number is correct.".format(len(self.params)))
+        return self.params
 
     def optimize_feed_location(self, col_name, stream_name=None, lb_frac=0.1, ub_frac=0.9):
         '''
