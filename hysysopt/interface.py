@@ -49,7 +49,6 @@ def connect_hysys(filename):
     '''
 
     # Establish connection to Hysys app COM interface
-    print('=' * 45)
     print('CONNECTING TO THE HYSYS APPLICATION ...')
     hy_app = win32.gencache.EnsureDispatch('HYSYS.Application')
 
@@ -72,7 +71,7 @@ def connect_hysys(filename):
     # Ensure Hysys case file can be opened
     hy_case.Visible = True
     hy_title = hy_case.Title.Value
-    print('... Hysys case file identified as', hy_title)
+    print('>>> Hysys case file identified as', hy_title)
 
     # 06 Aspen Hysys Fluid Package Name
     # package_name = hy_case.Flowsheet.FluidPackage.PropertyPackageName
@@ -102,7 +101,6 @@ def identify_streams(hy_case, verbose=False):
     if verbose:
         print("Identified {} material streams:".format(len(m_streams)))
         print([ms.name for ms in m_streams])
-        print('=' * 45)
 
     if verbose: print("Identifying energy streams present in Hysys file...")
     es_interface = hy_case.Flowsheet.EnergyStreams
@@ -111,7 +109,6 @@ def identify_streams(hy_case, verbose=False):
     if verbose:
         print("Identified {} material streams:".format(len(e_streams)))
         print([es.name for es in e_streams])
-        print('=' * 45)
 
     return m_streams, e_streams
 

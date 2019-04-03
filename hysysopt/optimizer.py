@@ -114,12 +114,11 @@ class HysysOptimizer:
                 param["btm_interface"] = ss.Cell(_get_cell_ref(i, 4))
 
             # 6. Add the parameter to the list
-            params.append(param)
+            self.params.append(param)
             print("... Identified: {}{} with lb={}, ub={}".format(
                 param["name"], " ({})".format(unit) if unit != "" else "", param["lb"], param["ub"]))
 
         print("Acquired {} optimization variables. Please ensure that this number is correct.".format(len(params)))
-        print('=' * 45)
         return params
 
     def optimize_feed_location(self, col_name, stream_name=None, lb_frac=0.1, ub_frac=0.9):
@@ -171,7 +170,6 @@ class HysysOptimizer:
 
         self.params.append(param)
         print("{} variables currently identified.".format(len(self.params)))
-        print('=' * 45)
 
     def list_params(self):
         for p in self.params:
